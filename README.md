@@ -1,14 +1,8 @@
 # TikTok Slideshow MCP
 
-An [MCP](https://modelcontextprotocol.io) server that assembles TikTok photo **slideshows**
-and sends them to your TikTok **inbox as drafts** — the same "send to inbox to finish later"
-mechanism apps like Postfast use. You (or an automation, e.g. another Claude agent that
-generates images) call the `create_slideshow` tool with local image paths; the server hosts
-the images and uses TikTok's Content Posting API in `MEDIA_UPLOAD` mode, so the slideshow
-shows up as a draft notification in your TikTok app, ready to finish editing and post.
+An MCP server that assembles TikTok photo **slideshows** and sends them to your TikTok **inbox as drafts** (to verify and make any final changes). You (or an automation, e.g. another Claude agent that generates images) call the `create_slideshow` tool with local image paths. The server hosts the images and uses TikTok's Content Posting API in `MEDIA_UPLOAD` mode, so the slideshow shows up as a draft notification in your TikTok app, ready to finish editing and post.
 
-It is designed to be driven by an AI agent over MCP, but also ships with plain CLI scripts so
-you can use it standalone.
+It is designed to be driven by an AI agent over MCP, but also ships with plain CLI scripts so you can use it standalone.
 
 ```
 local images ──► Cloudflare R2 (served from YOUR verified domain) ──► TikTok content/init
@@ -19,30 +13,12 @@ local images ──► Cloudflare R2 (served from YOUR verified domain) ──�
 
 ---
 
-## Read this first: concepts that trip people up
+## Note:
 
-**1. A TikTok "app" is NOT an iOS/Android app.**
-It's an **API client registration** you create on the [TikTok for Developers](https://developers.tiktok.com)
-website — like creating a project in Google Cloud or registering an app with Stripe. You fill
-out a web form and get a **Client key** + **Client secret**. There's nothing to build or
-publish to an app store. The real software is *this* server running on your machine.
-
-**2. You do NOT need to submit your app for review / audit for personal use.**
-TikTok provides a **Sandbox** environment for exactly this. In a sandbox you add your own
-TikTok account as a **target user**, and the API works for that account immediately — no audit
-required. The public audit/review is only needed if you want *other people's* accounts to be
-able to post through your app. For posting to your own account, sandbox is enough, forever.
-
-**3. A Sandbox is configured separately from production — and has its own credentials.**
-This is the #1 source of confusion. Each sandbox has its **own Client key/secret** (sandbox
-keys are prefixed `sb...`) and its **own** Login Kit config, redirect URIs, scopes, and target
-users. Configuring these on the production app does *not* carry them into the sandbox. **Use
-the sandbox's credentials and configure everything inside the sandbox.**
-
-**4. Photos must be hosted on a domain you verify — there's no direct upload.**
+**Photos must be hosted on a domain you verify — there's no direct upload.**
 TikTok's photo endpoint only accepts images via `PULL_FROM_URL` (it fetches public URLs).
 Direct byte upload (`FILE_UPLOAD`) is **video-only**. So the images must sit at public URLs on
-a domain you've **verified** in the developer portal. This server uses **Cloudflare R2** for
+a domain you've verified in the developer portal. This server uses Cloudflare R2 for
 that. You need a domain you own (any domain — it can be a subdomain of an unrelated site).
 
 ---
@@ -52,39 +28,34 @@ that. You need a domain you own (any domain — it can be a subdomain of an unre
 - Python 3.10+
 - A **TikTok for Developers** account (free)
 - A **domain you own** (any domain; you'll use a subdomain like `tt-media.yourdomain.com`)
-- A **Cloudflare** account with that domain's DNS on Cloudflare (free), plus **R2** enabled
-  (R2 has a generous free tier; enabling it requires adding a payment method)
+- A **Cloudflare** account with that domain's DNS on Cloudflare (free), plus R2 enabled (R2 has a generous free tier, but enabling it will require adding a payment method)
 
 ---
 
 ## Setup
 
 ### 1. Create the TikTok app + sandbox
-1. Go to <https://developers.tiktok.com> → **Manage apps** → create an app.
-2. Add the **Login Kit** and **Content Posting API** products.
-3. Create a **Sandbox** (Manage app → Sandbox). Inside the sandbox:
-   - Configure **Login Kit**: add the **Redirect URI** (see below), enable scopes
+1. Go to <https://developers.tiktok.com> → Manage apps → create an app.
+2. Create a Sandbox (Tab on top of page, next to production). Inside the sandbox:
+   - Add the login Kit and Content Posting API products
+   - Configure Login Kit: add the Redirect URI (see below), enable scopes
      **`user.info.basic`** and **`video.upload`**.
-   - Add your TikTok account as a **target user**.
-4. Note the **sandbox's** Client key + Client secret (they start with `sb...`).
+   - Add your TikTok account as a target user.
+4. Rest of info (icon, description, etc.) can be filled with any random placeholders since we won't actually be submitting this to TikTok
+   - A valid URL will need to be verified for some of the placeholder info (see below) 
+3. Note the sandbox's Client key + Client secret (they start with `sb...`).
 
 > Posting to your inbox uses the `video.upload` scope. You do **not** need `video.publish`
 > (that's for direct auto-posting and requires the audit).
 
 ### 2. Cloudflare R2 + a verified subdomain
 1. Make sure your domain's DNS is on Cloudflare (add the domain as a zone if it isn't).
-2. Cloudflare dashboard → **R2** → enable it → **Create bucket** (e.g. `tiktok-slideshows`).
-3. Open the bucket → **Settings** → **Custom Domains** → **Connect Domain** → enter a
-   subdomain like `tt-media.yourdomain.com`. Cloudflare auto-creates the DNS record + SSL.
-   Wait until it shows **Active**. (Leave the `r2.dev` URL disabled.)
-4. **R2** → **Manage R2 API Tokens** → **Create API Token** (Object Read & Write, scoped to the
-   bucket). This gives you an **Access Key ID** + **Secret Access Key**. Your **Account ID** is
-   on the R2 overview page.
+2. Cloudflare dashboard → R2 → enable it → Create bucket (e.g. `tiktok-slideshows`).
+3. Open the bucket → Settings → Custom Domains → Connect Domain → enter a subdomain like `tt-media.yourdomain.com`. Cloudflare auto-creates the DNS record + SSL. Wait until it shows **Active**. (Leave the `r2.dev` URL disabled.)
+4. R2 → Manage R2 API Tokens → Create API Token (Object Read & Write, scoped to the bucket). This gives you an Access Key ID + Secret Access Key. Your Account ID is on the R2 overview page.
 
 ### 3. Verify the domain with TikTok
-TikTok won't pull images from an unverified domain. In your **sandbox** → **URL properties /
-domain verification** → add `tt-media.yourdomain.com` (or the URL prefix
-`https://tt-media.yourdomain.com/`) and verify it:
+TikTok won't pull images from an unverified domain. In your sandbox → URL properties / domain verification → add `tt-media.yourdomain.com` and verify it:
 - **DNS method (easiest on Cloudflare):** TikTok gives a `TXT` value → add a TXT record in
   Cloudflare DNS (Name `tt-media`) → click Verify.
 - **File method:** upload TikTok's verification `.txt` to your R2 bucket so it's reachable at
@@ -94,22 +65,18 @@ domain verification** → add `tt-media.yourdomain.com` (or the URL prefix
 Copy `.env.example` to `.env` and fill in (use the **sandbox** TikTok credentials):
 
 ```
-TIKTOK_CLIENT_KEY=sb...                 # sandbox client key
-TIKTOK_CLIENT_SECRET=...                # sandbox client secret
+TIKTOK_CLIENT_KEY=sb...
+TIKTOK_CLIENT_SECRET=...
+
+# make sure this is added to the tiktok sandbox settings as well
 TIKTOK_REDIRECT_URI=https://tt-media.yourdomain.com/oauth/callback
+
 R2_ACCOUNT_ID=...
 R2_ACCESS_KEY_ID=...
 R2_SECRET_ACCESS_KEY=...
 R2_BUCKET=tiktok-slideshows
 R2_PUBLIC_BASE_URL=https://tt-media.yourdomain.com
 ```
-
-The redirect URI only needs to be a registered HTTPS URL where you can read the `?code=...`
-off the address bar — it does **not** need to serve a real page (a 404 is fine).
-
-> ⚠️ **Environment variables override `.env`.** pydantic reads real env vars at higher
-> priority than the file. If something seems to ignore your `.env`, check for a stray
-> `$env:TIKTOK_CLIENT_KEY` (PowerShell) / `export TIKTOK_CLIENT_KEY` (bash) in your shell.
 
 ### 5. Install
 ```bash
@@ -129,10 +96,7 @@ Then connect your TikTok account:
 ```bash
 .venv/Scripts/python.exe scripts/login.py
 ```
-It opens TikTok's authorization page → approve (with the account you added as a target user) →
-copy the full redirect URL from the address bar → paste it back. On success it prints your
-granted scopes (`user.info.basic,video.upload`) and verifies your display name. **You log in
-once**; tokens are saved to `~/.tiktok_slideshow_mcp/tokens.json` and auto-refresh (~1 year).
+It opens TikTok's authorization page → approve (with the account you added as a target user) → copy the full redirect URL from the address bar (it does **not** need to serve a real page (a 404 is fine) → paste it back. On success it prints your granted scopes (`user.info.basic,video.upload`) and verifies your display name. **You log in once**; tokens are saved to `~/.tiktok_slideshow_mcp/tokens.json` and auto-refresh (~1 year).
 
 ---
 
