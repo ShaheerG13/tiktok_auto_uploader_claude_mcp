@@ -52,7 +52,8 @@ that. You need a domain you own (any domain — it can be a subdomain of an unre
 1. Make sure your domain's DNS is on Cloudflare (add the domain as a zone if it isn't).
 2. Cloudflare dashboard → R2 → enable it → Create bucket (e.g. `tiktok-slideshows`).
 3. Open the bucket → Settings → Custom Domains → Connect Domain → enter a subdomain like `tt-media.yourdomain.com`. Cloudflare auto-creates the DNS record + SSL. Wait until it shows **Active**. (Leave the `r2.dev` URL disabled.)
-4. R2 → Manage R2 API Tokens → Create API Token (Object Read & Write, scoped to the bucket). This gives you an Access Key ID + Secret Access Key. Your Account ID is on the R2 overview page.
+4. Under Settings → Object Lifecycle Rules → Default Multipart Abort Rule (Edit) → select `Delete uploaded objects after:` and choose 7 days
+5. R2 → Manage R2 API Tokens → Create API Token (Object Read & Write, scoped to the bucket). This gives you an Access Key ID + Secret Access Key. Your Account ID is on the R2 overview page.
 
 ### 3. Verify the domain with TikTok
 TikTok won't pull images from an unverified domain. In your sandbox → URL properties / domain verification → add `tt-media.yourdomain.com` and verify it:
@@ -161,7 +162,7 @@ inbox — tap the notification to finish editing and post.
 
 ## Limits & notes
 - Up to **35** images per slideshow; **6** API requests/min per account.
-- Add an R2 **lifecycle rule** (e.g. delete objects after 7 days) so pulled images don't
+- Make sure to add an R2 **lifecycle rule** (e.g. delete objects after 7 days) so pulled images don't
   accumulate — TikTok fetches them at post time and doesn't need them afterward.
 - Until your app passes TikTok's audit, posting works only for **sandbox target users** (i.e.
   your own account) — which is all you need for personal use.
